@@ -731,7 +731,7 @@ def append_predictions(model,
     else: # target_type 'binary' or 'multiclass'
 
         train_results = df_preprocessed.copy()
-        pred_cols = ['pred_prob_' + clss for clss in label_encoder.classes_]
+        pred_cols = ['pred_prob_' + str(clss) for clss in label_encoder.classes_]
         predictions = model.predict_proba(df)
         train_results[pred_cols] = predictions
         train_results[target_name + '_prediction'] = label_encoder.inverse_transform(np.argmax(predictions, 1))
@@ -770,21 +770,26 @@ def prediction_probability_distribution_plot(preds_df,
     
     """    
     
+
     for target_class in target_classes:
 
         preds_class = preds_df[preds_df[target_colname] == target_class]
-        pred_classes = ['pred_prob_' + clss for clss in target_classes]
+        pred_classes = ['pred_prob_' + str(clss) for clss in target_classes]
+        if len(target_classes) == 2:
+            pred_classes = pred_classes[-1:]
         data = [preds_class[pred] for pred in pred_classes]
                 
         fig = ff.create_distplot(data, 
                                  pred_classes, 
                                  colors=colors,
                                  bin_size=bin_size,
+                                 histnorm='probability',
                                  show_curve=show_curve,
                                  )
 
         # Add title
         fig.update_layout(title_text=f'Prediction Probability Distributions for {target_colname} {target_class}', 
+                          yaxis_range=[0,0.5],
                           width=600,
                           height=600)
         fig.show()
