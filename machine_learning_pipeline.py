@@ -293,6 +293,7 @@ def instantiate_lgb_classifier(trial : Trial) -> LGBMClassifier:
         'bagging_fraction': trial.suggest_float('bagging_fraction', 0.1, 1.0),
         'bagging_freq': trial.suggest_int('bagging_freq', 1, 10),
         'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
+        'verbosity': -1,
         'random_state': 0
     }
     return LGBMClassifier(**params)
@@ -309,6 +310,7 @@ def instantiate_lgb_regressor(trial : Trial) -> LGBMRegressor:
         'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
         'bagging_freq': trial.suggest_int('bagging_freq', 1, 7),
         'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
+        'verbosity': -1,
         'random_state': 0
     }
     return LGBMRegressor(**params)
@@ -325,6 +327,7 @@ def instantiate_lgb_multiclass(trial : Trial) -> LGBMClassifier:
         'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
         'bagging_freq': trial.suggest_int('bagging_freq', 1, 7),
         'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
+        'verbosity': -1,
         'random_state': 0
     }
     return LGBMClassifier(**params)
@@ -708,15 +711,6 @@ def append_predictions(model,
     if df_preprocessed is None:
         df_preprocessed = df
 
-    # if target_type == 'binary':
-
-    #     predictions = model.predict_proba(df)[:,1]
-    #     train_results = df_preprocessed.copy()
-    #     train_results[target_name + '_prediction'] = predictions
-    #     train_results[target_name] = target_values
-    #     train_results['error'] = train_results[target_name] - train_results[target_name + '_prediction']
-    #     train_results = train_results.sort_values('error')
-    #     train_results = train_results.reset_index()
                             
     if target_type == 'continuous':
 
@@ -891,6 +885,7 @@ def train_test_distribution_plots(train_df,
         fig.add_trace(go.Box(y=aux_train[col].values,
                              name='Train ' + col,
                              showlegend=False,
+                             boxpoints=False,
                              pointpos=-1.8,
                              marker_color='rgb(9,56,125)',
                              line_color='rgb(9,56,125)',
@@ -901,6 +896,7 @@ def train_test_distribution_plots(train_df,
                             name='Test ' + col,
                             showlegend=False,
                             pointpos=-1.8,
+                            boxpoints=False,
                             marker_color='rgb(107,174,214)',
                             line_color='rgb(107,174,214)',                     
                             marker_size=4),
