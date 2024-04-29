@@ -54,13 +54,22 @@ from xgboost import XGBClassifier, XGBRegressor
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 import plotly.figure_factory as ff
 import plotly.express as px
-
+from operator import add, sub, mul, truediv
+from sklearn.preprocessing import FunctionTransformer
 
 ########## IMPUTERS #########
 
-def instantiate_numerical_simple_imputer(trial : Trial, fill_value : int=-1) -> SimpleImputer:
+
+def instantiate_numerical_simple_imputer(trial : Trial) -> SimpleImputer:
     strategy = trial.suggest_categorical(
-        'numerical_strategy', ['mean', 'median', 'most_frequent', 'constant']
+        'numerical_strategy', ['mean', 'median']
+    )
+    return SimpleImputer(strategy=strategy)
+
+
+def instantiate_categorical_simple_imputer(trial : Trial, fill_value : str='missing_value') -> SimpleImputer:
+    strategy = trial.suggest_categorical(
+        'categorical_strategy', ['most_frequent', 'constant']
     )
     return SimpleImputer(strategy=strategy, fill_value=fill_value)
 
@@ -70,16 +79,22 @@ def instantiate_numerical_simple_imputer(trial : Trial, fill_value : int=-1) -> 
 
 def instantiate_encoder(trial : Trial):
     encoder_strategy = trial.suggest_categorical(
-        'categorical_encoder', ['ordinal', 
-                                # 'onehot', 
+        'categorical_encoder', [
+                                'ordinal', 
+                                'onehot', 
                                 'binary', 
                                 'helmert', 
                                 'sum', 
                                 'target',
                                 # 'woe', 
-                                'catboost'
+                                # 'catboost'
                                 ]
     )
+
+    return encoder_selection(encoder_strategy)
+
+
+def encoder_selection(encoder_strategy):
 
     if encoder_strategy == 'ordinal':
         encoder = OrdinalEncoder()
@@ -136,6 +151,72 @@ def instantiate_feature_interaction(trial : Trial) -> PolynomialFeatures:
     }
     return PolynomialFeatures(**params)
 
+from numpy import inf
+
+
+def numerical_features_interactions_pd(df, 
+                                        numerical_features, 
+                                        interaction_types=[('+', add), ('*', mul), ('/', truediv)]):
+
+
+    """
+    
+    """
+
+    enhanced_df = df.copy()
+    for operation_sign, operation in interaction_types:
+        for i, feature_1 in enumerate(numerical_features):
+            for feature_2 in numerical_features[i+1:]:
+                new_feature_series = operation(enhanced_df[feature_1], enhanced_df[feature_2])
+                new_feature_series.name = feature_1 + operation_sign + feature_2
+                enhanced_df = pd.concat([enhanced_df, new_feature_series], axis=1)
+    
+    
+    enhanced_df = enhanced_df.replace([np.inf, -np.inf], -1)  
+    return enhanced_df
+
+
+def numerical_features_interactions(df, 
+                                        numerical_features, 
+                                        interaction_types=[('+', add), ('*', mul), ('/', truediv)]):
+
+
+    """
+    
+    """
+
+    enhanced_df = df.copy()
+    for operation_sign, operation in interaction_types:
+        for i in range(len((numerical_features))):
+            for j in range(len(numerical_features[i+1:])):
+                new_feature_series = operation(enhanced_df[:,i], enhanced_df[:,j+1])
+                new_feature_series = np.expand_dims(new_feature_series, axis=1)
+                # print(enhanced_df.shape)
+                # print(new_feature_series.shape)
+                enhanced_df = np.concatenate([enhanced_df, new_feature_series], axis=1)
+    enhanced_df[enhanced_df == -inf] = -1
+    enhanced_df[enhanced_df == inf] = -1
+    return enhanced_df
+
+
+
+def feature_interaction_names(transformer,
+                              numerical_features, 
+                              interaction_types=[('+', add), ('*', mul), ('/', truediv)]):
+
+
+    """
+    
+    """
+
+    enhanced_numerical_features = numerical_features.copy()
+
+    for operation_sign, operation in interaction_types:
+        for i, feature_1 in enumerate(numerical_features):
+            for feature_2 in numerical_features[i+1:]:
+                enhanced_numerical_features.append(feature_1 + operation_sign + feature_2)
+
+    return enhanced_numerical_features
 
 
 ########## COLUMN SELECTION #########
@@ -306,6 +387,7 @@ def instantiate_lgb_regressor(trial : Trial) -> LGBMRegressor:
         'lambda_l1': trial.suggest_float('lambda_l1', 1e-8, 10.0, log=True),
         'lambda_l2': trial.suggest_float('lambda_l2', 1e-8, 10.0, log=True),
         'num_leaves': trial.suggest_int('num_leaves', 2, 256),
+        'max_depth': trial.suggest_int('max_depth', 1, 8),
         'feature_fraction': trial.suggest_float('feature_fraction', 0.4, 1.0),
         'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
         'bagging_freq': trial.suggest_int('bagging_freq', 1, 7),
@@ -399,8 +481,6 @@ def instantiate_learner(trial : Trial, objective, algorithms):
         'algorithm', algorithms
         )
     
-    model = ''
-
     if objective == 'regression':
     
         if algorithm =='histgb':
@@ -455,36 +535,130 @@ def instantiate_learner(trial : Trial, objective, algorithms):
     
     return model
 
+    
+def learner_selection(algorithm, objective, **kwargs):
+
+    if objective == 'regression':
+    
+        if algorithm =='histgb':
+            model = HistGradientBoostingRegressor(**kwargs)
+        elif algorithm =='lgb':
+            model = LGBMRegressor(**kwargs)
+        elif algorithm =='extratrees':
+            model = ExtraTreesRegressor(**kwargs)
+        elif algorithm =='adaboost':
+            model = AdaBoostRegressor(**kwargs)
+        elif algorithm == 'linear':
+            model = LinearRegression(**kwargs)
+        elif algorithm == 'ridge':
+            model = Ridge(**kwargs)
+        elif algorithm == 'xgb':
+            model = XGBRegressor(**kwargs)
+        elif algorithm == 'catboost':
+            model = CatBoostRegressor(**kwargs)
+        # elif algorithm=='knn':
+        #     model = instantiate_knn(trial)
+    
+    elif objective == 'classification':
+
+        if algorithm=='histgb':
+            model = HistGradientBoostingClassifier(**kwargs)
+        elif algorithm=='lgb':
+            model = LGBMClassifier(**kwargs)
+        elif algorithm=='extratrees':
+            model = ExtraTreesClassifier(**kwargs)
+        elif algorithm=='adaboost':
+            model = AdaBoostClassifier(**kwargs)
+        elif algorithm == 'xgb':
+            model = XGBClassifier(**kwargs)
+        elif algorithm == 'catboost':
+            model = CatBoostClassifier(**kwargs)
+
+        # elif algorithm=='knn':
+        #     model = instantiate_knn(trial)
+
+    elif objective == 'multiclass':
+
+        if algorithm=='histgb':
+            model = HistGradientBoostingClassifier(**kwargs)
+        elif algorithm=='lgb':
+            model = LGBMClassifier(objective='multiclass', **kwargs)
+        # elif algorithm=='extratrees':
+        #     model = instantiate_extratrees_classifier(trial)
+        # elif algorithm=='adaboost':
+        #     model = instantiate_adaboost_classifier(trial)
+        # # elif algorithm=='knn':
+        # #     model = instantiate_knn(trial)
+    
+    return model
+
 
 
 ########## PIPELINES #########
 
 
-def instantiate_numerical_pipeline(trial : Trial) -> Pipeline:
+def instantiate_numerical_pipeline(trial : Trial, 
+                                   imputation_transformer,
+                                   pandarizer,
+                                   interactions_transformer=FunctionTransformer()) -> Pipeline:
     pipeline = Pipeline([
-        # ('imputer', instantiate_numerical_simple_imputer(trial)),
+        ('imputer', imputation_transformer),
+        ("pandarizer", pandarizer),
+        ('interactions', interactions_transformer),
         ('scaler', instantiate_robust_scaler(trial))
     ])
     return pipeline
 
 
-def instantiate_categorical_pipeline(trial : Trial) -> Pipeline:
+def instantiate_categorical_pipeline(trial : Trial, 
+                                     imputation_transformer) -> Pipeline:
     pipeline = Pipeline([
-        # ('imputer', instantiate_categorical_simple_imputer(trial)),
+        ('imputer', imputation_transformer),
         ('encoder', instantiate_encoder(trial))
     ])
     return pipeline
 
 
-def instantiate_processor(trial : Trial, numerical_columns : list[str], categorical_columns : list[str]) -> ColumnTransformer:
-  
-    numerical_pipeline = instantiate_numerical_pipeline(trial)
-    categorical_pipeline = instantiate_categorical_pipeline(trial)
-  
-    # selected_numerical_columns = choose_columns(trial, numerical_columns)
-    selected_numerical_columns = numerical_columns
-    # selected_categorical_columns = choose_columns(trial, categorical_columns)
-    selected_categorical_columns = categorical_columns
+def instantiate_processor(trial : Trial, 
+                          numerical_columns : list[str], 
+                          categorical_columns : list[str],
+                          with_feature_selection : bool=False,
+                          with_imputation : bool=False, 
+                          with_interactions : bool=False,
+                          ) -> ColumnTransformer:
+    
+    if with_feature_selection:
+        selected_numerical_columns = choose_columns(trial, numerical_columns)
+        selected_categorical_columns = choose_columns(trial, categorical_columns)
+    else:
+        selected_numerical_columns = numerical_columns
+        selected_categorical_columns = categorical_columns
+
+    if with_interactions:
+        interactions_transformer = FeaturePairInteractions(operations=['+', '*', '/'])
+    else:
+        interactions_transformer = PassthroughTransformer()
+
+
+    if with_imputation:
+        numerical_imputation_transformer = instantiate_numerical_simple_imputer(trial)
+        categorical_imputation_transformer = instantiate_categorical_simple_imputer(trial)
+        numerical_pandarizer = FunctionTransformer(lambda x: pd.DataFrame(x, columns=selected_numerical_columns))
+    else:
+        # the FunctionTransformer without a function as argument applies the identity transformation
+        numerical_imputation_transformer = PassthroughTransformer()
+        categorical_imputation_transformer = PassthroughTransformer()
+        numerical_pandarizer = PassthroughTransformer()
+
+
+    numerical_pipeline = instantiate_numerical_pipeline(trial, 
+                                                        numerical_imputation_transformer, 
+                                                        numerical_pandarizer,
+                                                        interactions_transformer)
+    
+    categorical_pipeline = instantiate_categorical_pipeline(trial, 
+                                                            categorical_imputation_transformer,
+                                                            )
   
     processor = ColumnTransformer([
       ('numerical_pipeline', numerical_pipeline, selected_numerical_columns),
@@ -509,11 +683,18 @@ def instantiate_model(trial : Trial,
                       numerical_columns : list[str], 
                       categorical_columns : list[str], 
                       objective: str, 
-                      algorithms: list[str]) -> Pipeline:
+                      algorithms: list[str],
+                      with_feature_selection: bool=False,
+                      with_imputation : bool=False, 
+                      with_interactions : bool=False,
+                      ) -> Pipeline:
   
     processor = instantiate_processor(trial, 
                                       numerical_columns, 
-                                      categorical_columns)
+                                      categorical_columns,
+                                      with_feature_selection,
+                                      with_imputation,
+                                      with_interactions)
   
     learner = instantiate_learner(trial, 
                                   objective, 
@@ -582,6 +763,9 @@ def objective(trial: Trial,
               cv_scoring: str,              
               numerical_columns : Optional[list[str]]=None, 
               categorical_columns : Optional[list[str]]=None, 
+              with_feature_selection: bool=False,
+              with_imputation : bool=False, 
+              with_interactions : bool=False,
               random_state : int=0, 
               base : int=2, 
               n_rungs=4) -> float:
@@ -600,7 +784,15 @@ def objective(trial: Trial,
             *X.select_dtypes(include=['object', 'category']).columns
         ]
     
-    model = instantiate_model(trial, numerical_columns, categorical_columns, objective, algorithms)
+    model = instantiate_model(trial, 
+                              numerical_columns, 
+                              categorical_columns, 
+                              objective, 
+                              algorithms, 
+                              with_feature_selection, 
+                              with_imputation, 
+                              with_interactions)
+    
     n_samples_list = generate_sample_numbers(y_train, base, n_rungs)
       
     for n_samples in n_samples_list:
@@ -661,14 +853,14 @@ def objective(trial: Trial,
 ################### MODEL EXPLAINABILITY ####################
 
 
-def shap_partial_dependence_plots(preprocessed_df, shap_values):
+def shap_partial_dependence_plots(preprocessed_df, shap_values, n_charts=12):
 
     """
     
     """
 
     importance_features = preprocessed_df.columns[np.argsort(-np.abs(shap_values).mean(0))]
-
+    importance_features = importance_features[:n_charts]
     nrows = 4
     ncols = -(-len(importance_features) // nrows)
 
@@ -719,7 +911,7 @@ def append_predictions(model,
         train_results[target_name + '_prediction'] = predictions
         train_results[target_name] = target_values
         train_results['error'] = train_results[target_name] - train_results[target_name + '_prediction']
-        train_results = train_results.sort_values('error')
+        # train_results = train_results.sort_values('error')
         train_results = train_results.reset_index()
 
     else: # target_type 'binary' or 'multiclass'
@@ -816,11 +1008,12 @@ def split_features(df,
     int_cat_features = unique_df[unique_df <= categorical_threshold].index.to_list()
     int_num_features = unique_df[unique_df > categorical_threshold].index.to_list()
 
-    numerical_features = df.select_dtypes(exclude=['object', 'int']).columns.to_list() + int_num_features
+    numerical_features = df.select_dtypes(exclude=['object', 'int', 'category']).columns.to_list() + int_num_features
     if target_col in numerical_features: numerical_features.remove(target_col)
 
-    categorical_features = df.select_dtypes(include=['object']).columns.to_list() + int_cat_features
+    categorical_features = df.select_dtypes(include=['object', 'category']).columns.to_list() + int_cat_features
     if target_col in categorical_features: categorical_features.remove(target_col)
+    df[categorical_features] = df[categorical_features].astype('category')
 
     print(f'The numerical features are: {numerical_features}')
     print(f'The categorical features are: {categorical_features}')
@@ -977,3 +1170,130 @@ def correlation_plot(df):
                 vmin=-1, 
                 vmax=1)
     plt.show()
+
+
+################### CUSTOM TRANSFORMERS ####################
+
+from sklearn.base import TransformerMixin, BaseEstimator
+
+
+# Changed the base classes here, see Point 3
+class PassthroughTransformer(BaseEstimator, TransformerMixin):
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        self.X = X
+        return X
+
+    def get_feature_names(self):
+        return self.X.columns.tolist()
+
+
+class DoubleTransformer(BaseEstimator, TransformerMixin):
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X: pd.DataFrame):
+        self.columns = X.columns
+        return X * 2
+
+    def get_feature_names_out(self, feature_names):
+        return [f'{col}_doubled' for col in self.columns]
+    
+
+# create a class to add a new feature AgeMedianByDistGroup
+class AgeMedianByDistGroup(BaseEstimator, TransformerMixin):
+    '''get the median age of each distance group''' 
+    def __init__(self, train):
+        self.age_median_by_dist_group = train.groupby('distance').apply(lambda x: x['age'].median())
+        self.age_median_by_dist_group.name = 'age_median_by_dist_group'
+        
+    def fit(self, X=None, y=None):
+        return self
+    
+    def transform(self, X, y=None):
+        new_X = pd.merge(X, self.age_median_by_dist_group, 
+                         left_on = 'distance', right_index=True, how='left')        
+        X['age_median_by_dist_group'] = new_X['age_median_by_dist_group']
+        return X
+    
+
+# create a class to add a new feature AgeMedianByDistGroup
+class FeatureBasicInteractions(BaseEstimator, TransformerMixin):
+    
+    ''' Appends ''' 
+    def __init__(self, train):
+        self.age_median_by_dist_group = train.groupby('distance').apply(lambda x: x['age'].median())
+        self.age_median_by_dist_group.name = 'age_median_by_dist_group'
+        
+    def fit(self, X=None, y=None):
+        return self
+    
+    def transform(self, X, y=None):
+        new_X = pd.merge(X, self.age_median_by_dist_group, 
+                         left_on = 'distance', right_index=True, how='left')        
+        X['age_median_by_dist_group'] = new_X['age_median_by_dist_group']
+        return X
+
+
+class FeaturePairInteractions(BaseEstimator, TransformerMixin):
+    
+    """
+    This transformer creates new columns which are the result 
+    of performing basic operations between two features in the dataframe.
+    Operations supported for the current version are addition ('+'),
+    subtraction ('-'), product ('*') and division ('/')
+    """
+    
+    def __init__(self, operations=['+', '-','*', '/']):
+        self.operations = operations
+        self.expanded_features = []
+    
+    def fit(self, X, y=None):
+        return self
+    
+    def transform(self, X):
+
+        if not isinstance(X, pd.DataFrame):
+            raise TypeError("Input X must be a pandas DataFrame.")
+
+        # initializing an empty DataFrame to store the expanded data
+        expanded_df = pd.DataFrame()
+        self.expanded_features = X.columns.to_list()
+
+        # iterating over specified operations
+        for op in self.operations:
+
+            # iterating over pairs of columns in the input DataFrame
+            for i, col1 in enumerate(X.columns):
+                for j, col2 in enumerate(X.columns[i+1:]):
+
+                    # creating a new column name representing the operation of the pair
+                    new_col_name = col1 + op + col2
+                    
+                    # performing the operation on the pair of columns
+                    if op == '+':
+                        result_values = X[col1] + X[col2]
+                    elif op == '*':
+                        result_values = X[col1] * X[col2]
+                    elif op == '/':
+                        # checking if denominator is zero
+                        zero_mask = X[col2] == 0
+                        # if denominator is zero, assign a default value (e.g., NaN)
+                        result_values = X[col1] / X[col2].where(~zero_mask, other=-1)
+                            
+                    # adding the new column to the expanded DataFrame
+                    expanded_df[new_col_name] = result_values
+                    # storing the names of the expanded features
+                    self.expanded_features.append(new_col_name)
+        
+        # Concatenate the original DataFrame with the expanded DataFrame
+        expanded_df = pd.concat([X, expanded_df], axis=1)
+        
+        return expanded_df
+    
+    def get_feature_names_out(self):
+        # Return the names of the expanded features
+        return self.expanded_features
