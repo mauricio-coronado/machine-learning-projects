@@ -4,8 +4,8 @@ import pandas as pd
 # import sweetviz as sv
 # import missingno as msno
 # from pandas.plotting import scatter_matrix
-
 # import matplotlib.pyplot as plt
+import kaleido
 
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -56,11 +56,18 @@ import plotly.figure_factory as ff
 import plotly.express as px
 from operator import add, sub, mul, truediv
 from sklearn.preprocessing import FunctionTransformer
+from IPython.display import Image
+
 
 ########## IMPUTERS #########
 
 
 def instantiate_numerical_simple_imputer(trial : Trial) -> SimpleImputer:
+
+    """
+    Instantiates a simple imputer for numerical data
+    """
+
     strategy = trial.suggest_categorical(
         'numerical_strategy', ['mean', 'median']
     )
@@ -68,6 +75,11 @@ def instantiate_numerical_simple_imputer(trial : Trial) -> SimpleImputer:
 
 
 def instantiate_categorical_simple_imputer(trial : Trial, fill_value : str='missing_value') -> SimpleImputer:
+
+    """
+    Instantiates a simple imputer for categorical data
+    """
+
     strategy = trial.suggest_categorical(
         'categorical_strategy', ['most_frequent', 'constant']
     )
@@ -78,14 +90,21 @@ def instantiate_categorical_simple_imputer(trial : Trial, fill_value : str='miss
 ########## ENCODERS #########
 
 def instantiate_encoder(trial : Trial):
+
+    """
+    Instantiates an encoder for categorical data. Each trial 
+    will be able to select a different encoder from the list 
+    defined in the encoder_strategy
+    """
+
     encoder_strategy = trial.suggest_categorical(
         'categorical_encoder', [
-                                'ordinal', 
+                                # 'ordinal', 
                                 'onehot', 
-                                'binary', 
-                                'helmert', 
-                                'sum', 
-                                'target',
+                                # 'binary', 
+                                # 'helmert', 
+                                # 'sum', 
+                                # 'target',
                                 # 'woe', 
                                 # 'catboost'
                                 ]
@@ -95,6 +114,10 @@ def instantiate_encoder(trial : Trial):
 
 
 def encoder_selection(encoder_strategy):
+
+    """
+    Auxiliar function for encoder_selection
+    """
 
     if encoder_strategy == 'ordinal':
         encoder = OrdinalEncoder()
@@ -117,6 +140,7 @@ def encoder_selection(encoder_strategy):
 
 
 def instantiate_woe_encoder(trial : Trial) -> WOEEncoder:
+
     params = {
         'sigma': trial.suggest_float('sigma', 0.001, 5),
         'regularization': trial.suggest_float('regularization', 0, 5),
@@ -129,6 +153,11 @@ def instantiate_woe_encoder(trial : Trial) -> WOEEncoder:
 ########## SCALERS #########
 
 def instantiate_robust_scaler(trial : Trial) -> RobustScaler:
+
+    """
+    Instantiates robust scaler for numerical data
+    """
+
     params = {
         'with_centering': trial.suggest_categorical(
             'with_centering', [True, False]
@@ -144,6 +173,11 @@ def instantiate_robust_scaler(trial : Trial) -> RobustScaler:
 ########## FEATURE ENGINEERING #########
 
 def instantiate_feature_interaction(trial : Trial) -> PolynomialFeatures:
+
+    """
+    Feature interactions for numerical data
+    """
+
     params = {
         'degree': trial.suggest_int('degree', 1, 3),
         'interaction_only': trial.suggest_categorical('interaction_only', [True, False]),
@@ -154,13 +188,13 @@ def instantiate_feature_interaction(trial : Trial) -> PolynomialFeatures:
 from numpy import inf
 
 
-def numerical_features_interactions_pd(df, 
+def numerical_features_interactions(df, 
                                         numerical_features, 
                                         interaction_types=[('+', add), ('*', mul), ('/', truediv)]):
 
 
     """
-    
+    Basic interactions function (not in use in the pipeline anymore)
     """
 
     enhanced_df = df.copy()
@@ -176,7 +210,7 @@ def numerical_features_interactions_pd(df,
     return enhanced_df
 
 
-def numerical_features_interactions(df, 
+def numerical_features_interactions_np(df, 
                                         numerical_features, 
                                         interaction_types=[('+', add), ('*', mul), ('/', truediv)]):
 
@@ -229,6 +263,11 @@ def feature_interaction_names(transformer,
 #     return selector
 
 def choose_columns(trial : Trial, columns : list[str]) -> list[str]:
+  
+  """
+  Randomly selection of featuress
+  """
+
   choose = lambda column: trial.suggest_categorical(column, [True, False])
   choices = [*filter(choose, columns)]
   return choices
@@ -238,6 +277,7 @@ def choose_columns(trial : Trial, columns : list[str]) -> list[str]:
 ########## MODELS #########
 
 def instantiate_linearregression(trial : Trial) -> LinearRegression:
+    
     params = {
         'fit_intercept': trial.suggest_categorical('fit_intercept', [True, False]),
         'n_jobs': -1,
@@ -718,6 +758,11 @@ def objective_slow(trial : Trial,
               categorical_columns : Optional[list[str]]=None, 
               random_state : int=0) -> float:
     
+    """
+    Old version of the optimizarion function without the pruning technique 
+
+    """
+    
     if numerical_columns is None:
         numerical_columns = [
             *X.select_dtypes(exclude=['object', 'category']).columns
@@ -801,38 +846,21 @@ def objective(trial: Trial,
         
         model.fit(X_train_sample, y_train_sample.values.ravel())
         
-        # print(model.predict_proba(X_test))
-        # print(model.predict_proba(X_test).shape)
-
-        # score = roc_auc_score(y_test, 
-        #                       model.predict_proba(X_test),
-        #                       multi_class='ovr',
-        #                       average="micro")
         
         if objective == 'classification':
 
-            score = roc_auc_score(y_test, 
-                                  model.predict_proba(X_test)[:,1],
-                                #   multi_class='ovr',
-                                #   average="micro"
-                                )
-        elif objective == 'regression':
+            score = roc_auc_score(y_test, model.predict_proba(X_test)[:,1])
 
-            
-            score = r2_score(y_test, 
-                                model.predict(X_test),
-                                #   multi_class='ovr',
-                                #   average="micro"
-                                )
+        elif objective == 'regression':
+        
+            score = r2_score(y_test, model.predict(X_test))
 
         elif objective == 'multiclass':
 
             score = roc_auc_score(y_test, 
                                   model.predict_proba(X_test),
                                   multi_class='ovr',
-                                  average="macro"
-                                )
-
+                                  average="macro")
 
         trial.report(score, n_samples)
     
@@ -951,7 +979,8 @@ def prediction_probability_distribution_plot(preds_df,
                                              target_colname,
                                              colors=px.colors.qualitative.G10,
                                              bin_size=.02,
-                                             show_curve=True):
+                                             show_curve=True,
+                                             renderer='notebook_connected'):
     """
     
     """    
@@ -978,7 +1007,8 @@ def prediction_probability_distribution_plot(preds_df,
                           yaxis_range=[0,0.5],
                           width=600,
                           height=600)
-        fig.show()
+        
+        fig.show(renderer=renderer, engine='orca')
 
 ##################### EDA #####################
         
@@ -1013,7 +1043,7 @@ def split_features(df,
 
     categorical_features = df.select_dtypes(include=['object', 'category']).columns.to_list() + int_cat_features
     if target_col in categorical_features: categorical_features.remove(target_col)
-    df[categorical_features] = df[categorical_features].astype('category')
+    df[categorical_features] = df[categorical_features].astype('object')
 
     print(f'The numerical features are: {numerical_features}')
     print(f'The categorical features are: {categorical_features}')
@@ -1042,7 +1072,8 @@ def pairplot(df,
 def train_test_distribution_plots(train_df,
                                   test_df,
                                   numerical_features,
-                                  sample=0.5
+                                  sample=0.5,
+                                  renderer='notebook_connected'
                                   ):
 
     """
@@ -1055,7 +1086,8 @@ def train_test_distribution_plots(train_df,
                         cols=3,
                         row_titles=numerical_features,
                         column_titles=['Distribution', 'Train', 'Test'],
-                        column_widths=[2, 1, 1])
+                        column_widths=[2, 1, 1],
+                        )
     
     group_labels = ['Train', 'Test']
         
@@ -1101,15 +1133,15 @@ def train_test_distribution_plots(train_df,
                           title_text="Train vs Test Feature Distributions for Numerical Features", 
                           showlegend=True)
     
-    
-    fig.show()
+    # show static graph for Github rendering
+    fig.show(renderer=renderer, engine='orca')
 
 
 
 def train_test_categorical_piecharts(train_df,
                                      test_df,
                                      categorical_features,
-                                     ):
+                                     renderer='notebook_connected'):
 
 
     """
@@ -1150,9 +1182,8 @@ def train_test_categorical_piecharts(train_df,
                           title_text="Train vs Test Feature Distributions for Categorical Features",
                           )
     
-    
-    fig.show()
-
+    # show static graph for Github rendering
+    fig.show(renderer=renderer, engine='orca')
 
 def correlation_plot(df):
 
@@ -1282,10 +1313,12 @@ class FeaturePairInteractions(BaseEstimator, TransformerMixin):
                         # checking if denominator is zero
                         zero_mask = X[col2] == 0
                         # if denominator is zero, assign a default value (e.g., NaN)
-                        result_values = X[col1] / X[col2].where(~zero_mask, other=-1)
+                        result_values = (X[col1] / X[col2]).where(~zero_mask, other=-1)
                             
                     # adding the new column to the expanded DataFrame
-                    expanded_df[new_col_name] = result_values
+                    result_values.name = new_col_name
+                    # expanded_df[new_col_name] = result_values
+                    expanded_df = pd.concat([expanded_df, result_values], axis=1)
                     # storing the names of the expanded features
                     self.expanded_features.append(new_col_name)
         
